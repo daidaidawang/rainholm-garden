@@ -17,6 +17,10 @@ Operit、Kelivo 用 MCP；ChatGPT 用 Actions；Claude Chat 用远程 MCP + OAut
 
 ---
 
+## 安卓互动动画兼容更新（v1.3.1）
+
+荣耀等安卓设备上的睡觉、沙发、野餐互动默认使用透明 WebP，避免视频透明通道失效产生色块。保留桌面 WebM 播放及静态图兜底。[更新说明与验证范围](docs/RELEASE-1.3.1.md)。
+
 ## 一键开始
 
 安装 Node.js 20 或以上版本，下载并解压 [最新版本](https://github.com/wuxuyun0606-collab/rainholm-garden/releases/latest)，在项目目录运行：

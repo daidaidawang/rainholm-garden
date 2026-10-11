@@ -24,6 +24,7 @@
     sleep: {
       name: "sleep", label: "床", scene: "cathome",
       ariaOn: "床，一起睡觉", ariaOff: "起床",
+      animfall: "assets/cats-duo-20260915/sleep-duo-anim-v1.webp?v=honorfix1011-v2",
       video: "assets/cats-duo-20260915/sleep-duo-alpha-v1.webm?v=alphaclean0918",
       poster: "assets/cats-duo-20260915/sleep-duo-poster.png?v=alphaclean0918",
       rect: [470, 127, 434.88],
@@ -33,6 +34,7 @@
     sofa: {
       name: "sofa", label: "沙发", scene: "cathome",
       ariaOn: "沙发，一起坐下", ariaOff: "起身",
+      animfall: "assets/cats-duo-20260915/sofa-duo-anim-v1.webp?v=honorfix1011-v2",
       video: "assets/cats-duo-20260915/sofa-duo-alpha-v1.webm?v=alphaclean0918",
       poster: "assets/cats-duo-20260915/sofa-duo-poster.png?v=alphaclean0918",
       rect: [992.5, 332, 217.44],
@@ -58,6 +60,7 @@
     picnic: {
       name: "picnic", label: "野餐布", scene: "garden",
       ariaOn: "野餐布，一起吃饼干", ariaOff: "起身",
+      animfall: "assets/cats-duo-20260915/picnic-duo-anim-v1.webp?v=honorfix1011-v2",
       video: "assets/cats-duo-20260915/picnic-duo-alpha-v1.webm?v=picnic0918-v1",
       poster: "assets/cats-duo-20260915/picnic-duo-poster.png?v=picnic0918-v1",
       rect: [214, 206, 213.32, 121.89],
@@ -99,6 +102,125 @@
   var RM = null;
   try { RM = window.matchMedia("(prefers-reduced-motion: reduce)"); } catch (_) { }
   function reduced() { try { return !!(RM && RM.matches); } catch (_) { return false; } }
+
+  /* Android/Honor use image decoding directly: a tiny video probe cannot certify
+     the hardware decoding/compositing path of the full-size scene videos.
+     ?duoAnimation=webp also allows compatibility mode with a masked desktop UA. */
+  var preferWebp = false;
+  try {
+    preferWebp = /Android|HarmonyOS|HONOR/i.test(navigator.userAgent || "") ||
+      !!(navigator.userAgentData && /Android/i.test(navigator.userAgentData.platform || "")) ||
+      new URLSearchParams(window.location.search).get("duoAnimation") === "webp";
+  } catch (_) { }
+  var ALPHA_PROBE = "assets/cats-duo-20260915/alpha-probe.webm?v=honorfix1011-v2";
+  var alphaOk = null; // null means not measured, including Android's direct image path.
+
+  function probeAlpha() {
+    var v = null, t = 0, over = false;
+    var finish = function (ok) {
+      if (over) return;
+      over = true;
+      alphaOk = ok;
+      if (t) { clearTimeout(t); t = 0; }
+      try { v.removeAttribute("src"); v.load(); } catch (_) { }
+      try { if (v.parentNode) v.parentNode.removeChild(v); } catch (_) { }
+      if (!dead && active && stages[active]) playStage(stages[active]);
+    };
+    try {
+      v = document.createElement("video");
+      v.muted = true; v.defaultMuted = true; v.playsInline = true;
+      v.setAttribute("muted", "");
+      v.setAttribute("playsinline", "");
+      v.setAttribute("webkit-playsinline", "");
+      v.setAttribute("aria-hidden", "true");
+      v.preload = "auto";
+      v.style.cssText = "position:absolute;left:-9999px;top:0;width:32px;height:32px;opacity:0;pointer-events:none";
+      v.addEventListener("loadeddata", function () {
+        try {
+          var c = document.createElement("canvas");
+          c.width = 32; c.height = 32;
+          var g = c.getContext("2d");
+          g.drawImage(v, 0, 0, 32, 32);
+          var d = g.getImageData(16, 16, 1, 1).data;
+          finish(d[3] > 16 && d[3] < 250 && d[0] > 120);
+        } catch (_) { finish(false); }      /* 画布被污染 / 读不了 ＝ 不认 */
+      });
+      v.addEventListener("error", function () { finish(false); });
+      t = setTimeout(function () { finish(false); }, 3000);
+      (document.body || document.documentElement).appendChild(v);
+      v.src = ALPHA_PROBE;
+      v.load();
+    } catch (_) { finish(false); }
+  }
+
+  function stopFall(st) {
+    var im = st.__fall;
+    st.__fall = null; // Invalidate late load/error callbacks before removing the source.
+    st.classList.remove("nds-live");
+    if (!im) return;
+    im.removeAttribute("src");
+    if (im.parentNode) im.parentNode.removeChild(im);
+  }
+
+  function playFall(st) {
+    if (st.__fall) return;
+    var im = document.createElement("img");
+    im.className = "nds-animfall";
+    im.alt = ""; im.decoding = "async";
+    im.addEventListener("load", function () {
+      if (st.__fall !== im || active !== st.__cfg.name || st.hidden || reduced()) return;
+      im.classList.add("nds-play"); st.classList.add("nds-live");
+    });
+    im.addEventListener("error", function () {
+      if (st.__fall === im) stopFall(st); // Keep the transparent PNG poster on failure.
+    });
+    st.__fall = im;
+    st.appendChild(im);
+    im.src = st.__cfg.animfall;
+  }
+
+  function stopVideo(st, unload) {
+    var v = st.__video;
+    if (!v) return;
+    try { v.pause(); } catch (_) { }
+    v.classList.remove("nds-play");
+    st.classList.remove("nds-live");
+    if (unload && v.getAttribute("src")) {
+      v.removeAttribute("src");
+      try { v.load(); } catch (_) { }
+    }
+  }
+
+  function playStage(st) {
+    if (dead || st.hidden || active !== st.__cfg.name || reduced()) return;
+    // Unknown capability shows the PNG poster, never a potentially opaque video.
+    if (!preferWebp && alphaOk === null && !st.__videoFailed) return;
+    st.__falling = !!st.__cfg.animfall && (preferWebp || alphaOk === false || !!st.__videoFailed);
+    if (st.__falling) {
+      stopVideo(st, true);
+      playFall(st);
+      return;
+    }
+    var v = st.__video;
+    if (!v) return;
+    if (!v.getAttribute("src")) { v.setAttribute("src", st.__cfg.video); v.load(); }
+    else if (st.__cfg.loop === false) { try { v.currentTime = 0; } catch (_) { } }
+    play(v);
+  }
+
+  function motionChanged() {
+    if (!active || !stages[active]) return;
+    var st = stages[active];
+    if (reduced()) {
+      stopVideo(st, false);
+      stopFall(st);
+      st.__falling = false;
+    } else playStage(st);
+  }
+  if (RM) {
+    if (RM.addEventListener) RM.addEventListener("change", motionChanged);
+    else if (RM.addListener) RM.addListener(motionChanged);
+  }
 
   var world = null, layer = null, hots = null, stages = {}, hotEls = {}, dead = false, booted = false;
   var scene = "garden";
@@ -187,12 +309,23 @@
        两刀：① video 自己的 poster 属性不再设（和 <img> 是同一张图，安卓上多一层多一次错位）；
        ② 视频真的在放（nds-play）时给舞台挂 nds-live，CSS 把 <img> 收掉 —— 视频盖住了就没它的事，
        它想露也没得露。暂停（非播完）摘掉 nds-live，静帧回来兜底。 */
-    v.addEventListener("playing", function () { v.classList.add("nds-play"); el.classList.add("nds-live"); });
+    v.addEventListener("playing", function () {
+      if (active !== cfg.name || el.__falling || reduced()) { try { v.pause(); } catch (_) { } return; }
+      v.classList.add("nds-play"); el.classList.add("nds-live");
+    });
     /* picnic0918：播完那一下也会把 paused 置 true。这时候**不能**摘 nds-play ——
        摘了视频就淡出、露出底下的 <img>。海报正好是末帧，画面其实一样，
        但中间隔着 .18s 的 opacity 过渡，会闪一下。所以播完的不摘，只有真被 pause() 的才摘。 */
-    v.addEventListener("pause", function () { if (!v.ended) { v.classList.remove("nds-play"); el.classList.remove("nds-live"); } });
-    v.addEventListener("ended", function () { v.classList.add("nds-play"); el.classList.add("nds-live"); });
+    v.addEventListener("pause", function () { if (!v.ended) { v.classList.remove("nds-play"); if (!el.__falling) el.classList.remove("nds-live"); } });
+    v.addEventListener("ended", function () {
+      if (active !== cfg.name || el.__falling || reduced()) return;
+      v.classList.add("nds-play"); el.classList.add("nds-live");
+    });
+    v.addEventListener("error", function () {
+      if (!v.getAttribute("src") || dead) return;
+      el.__videoFailed = true;
+      playStage(el);
+    });
     el.appendChild(v);
 
     el.__cfg = cfg; el.__video = v; el.__img = img;
@@ -523,16 +656,7 @@
     void st.offsetWidth;
     st.classList.add("nds-in");
 
-    if (!reduced()) {
-      var v = st.__video;
-      if (v) {
-        if (!v.getAttribute("src")) { v.setAttribute("src", st.__cfg.video); v.load(); }
-        /* picnic0918：不循环那一幕播完停在末帧，再点一次得**从头**放，
-           不然第二次进来只看见一张定格。循环那两幕本来就一直在转，不碰。 */
-        else if (st.__cfg.loop === false) { try { v.currentTime = 0; } catch (_) { } }
-        play(v);
-      }
-    }
+    playStage(st);
 
     /* 这个 tick 无条件起（v1 是 `if (api)` 才起 —— 猫晚到就永远没人管了）。
        它管两件事，顺序不能反：
@@ -603,6 +727,8 @@
       st.setAttribute("aria-hidden", "true");
       var v = st.__video;
       if (v) { try { v.pause(); } catch (_) { } }
+      stopFall(st);
+      st.__falling = false;
       showCats();                      /* 幕布收干净了，这才轮到真猫 */
     };
     if (instant || reduced()) done();
@@ -622,7 +748,7 @@
   function kick() {
     if (!active || reduced()) return;
     var st = stages[active];
-    if (!st || !st.__video) return;
+    if (!st || !st.__video || st.__falling || (!preferWebp && alphaOk === null)) return;
     if (st.__video.paused && !st.__video.ended) play(st.__video);
   }
 
@@ -658,6 +784,8 @@
   window.addEventListener("rainholm:garden-ready", function () { setTimeout(function () { mount(); syncScene(currentScene()); }, 0); });
   setTimeout(function () { if (!booted && !dead) { mount(); } }, 1500);
 
+  if (!preferWebp) probeAlpha();
+
   /* sofafix0918 验收探针：每幕两只猫的站位隔多远，两条线各过不过。
        lo ＝ turf.near（farFromOthers 的下限，低了 command() 直接不受理）
        hi ＝ turf.near × 1.8（【结伴】开始拽猫的距离，高了幕布会被它弹掉）
@@ -687,7 +815,7 @@
        ndsDuo.set('sofa',  {spots:{white:[1150,700]}})  改猫站的位置
        ndsDuo.show('sleep') / ndsDuo.hide() / ndsDuo.state() / ndsDuo.off() */
   window.ndsDuo = {
-    version: "duoscenes-20260915-v3+picnic0918+sofafix0918",
+    version: "duoscenes-20260915-v3+picnic0918+sofafix0918+honorfix1011-v2",
     cfg: CFG,
     timing: TIMING,
     set: function (key, patch) {
@@ -712,6 +840,7 @@
       return {
         scene: scene, active: active, pending: pending, reduced: reduced(),
         catsMounted: !!cats(),
+        alphaOk: alphaOk, compatibility: preferWebp ? "webp" : "auto", animfall: !!(st && st.__falling),
         catsHidden: catsHidden(),        /* ghostfix20260915：幕上的时候这里必须是 true */
         catsTicking: (function () { var a = cats(); try { return a ? a.ticking() : null; } catch (_) { return null; } })(),
         video: v ? { paused: v.paused, t: +v.currentTime.toFixed(2), w: v.videoWidth, h: v.videoHeight, src: v.getAttribute("src") || null } : null,

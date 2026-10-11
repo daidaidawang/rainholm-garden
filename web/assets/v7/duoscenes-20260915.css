@@ -47,6 +47,9 @@
    晚 .2s 再收，等视频那 .18s 淡入走完，中间不露空。 */
 .nds-stage img { transition: opacity 0s linear .2s; }
 .nds-stage.nds-live img { opacity: 0; }
+/* Transparent image animation fallback, above the PNG poster. */
+.nds-stage img.nds-animfall { opacity: 0; transition: opacity .18s ease; }
+.nds-stage img.nds-animfall.nds-play { opacity: 1; }
 
 /* ── 夜档 ────────────────────────────────────────────────────────────────────
    小窝的夜是换了一张底图（cat-home-night.png），不是给 #world 加滤镜，所以这两幕
@@ -95,5 +98,7 @@
    直接给首帧静态图，视频一帧都不放（脚本里也不会去 play）。 */
 @media (prefers-reduced-motion: reduce) {
   .nds-stage { transition: none; }
-  .nds-stage video { display: none; }
+  .nds-stage video,
+  .nds-stage img.nds-animfall { display: none; }
+  .nds-stage.nds-live img:not(.nds-animfall) { opacity: 1; transition: none; }
 }
