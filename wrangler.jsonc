@@ -16,6 +16,5 @@
   },
   "durable_objects": { "bindings": [{ "name": "GARDEN", "class_name": "Garden" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Garden"] }],
-  "secrets": { "required": ["GARDEN_USER_KEY", "GARDEN_AI_KEY"] },
   "observability": { "enabled": false }
 }
