@@ -17,20 +17,14 @@ export class Garden extends DurableObject {
     this.handler = null;
   }
   async initialize(origin) {
-    this.initStep = 'keys';
-    const keyCheck = value => typeof value !== 'string' ? 'missing' : /^[A-Za-z0-9_+/=-]{32,256}$/.test(value) ? 'format-ok' : 'invalid-format';
-    this.keyStatus = { player: keyCheck(this.env.GARDEN_USER_KEY), ai: keyCheck(this.env.GARDEN_AI_KEY) };
     const keys = validateKeys({ user: this.env.GARDEN_USER_KEY, ai: this.env.GARDEN_AI_KEY });
-    this.initStep = 'settings';
     const settings = this.store.load('settings') || {};
     this.origin = publicOrigin(this.env.GARDEN_PUBLIC_URL || settings.origin || origin);
     const epoch = String(this.env.GARDEN_OAUTH_EPOCH || '1');
-    this.initStep = 'save-settings';
     if (settings.origin !== this.origin || settings.epoch !== epoch) {
       this.store.save('oauth', { clients: {}, tokens: {} });
       this.store.save('settings', { origin: this.origin, epoch });
     }
-    this.initStep = 'load-garden';
     this.record = this.store.load('garden');
     if (!this.record) {
       this.record = structuredClone(example);
@@ -52,7 +46,6 @@ export class Garden extends DurableObject {
       }
       return result;
     };
-    this.initStep = 'create-handler';
     this.handler = await createGardenHandler({
       keys, publicBase: this.origin, localHosts: false, transact, mapSources,
       agentStorage: { load: async () => this.store.load('agent'), save: value => this.store.save('agent', value) },
@@ -67,18 +60,15 @@ export class Garden extends DurableObject {
         res.end(req.method === 'HEAD' ? undefined : Buffer.from(await response.arrayBuffer()));
       },
     });
-    this.initStep = 'ready';
   }
   fetch(request) {
     const run = async () => {
-      let step = 'start';
       try {
         const url = new URL(request.url);
-        if (!this.handler) { step = 'initialize'; await this.initialize(url.origin); }
+        if (!this.handler) await this.initialize(url.origin);
         if (url.origin !== this.origin) return new Response('Use the configured garden URL.', { status: 403 });
         // Ports are isolate-wide. A request-scoped ephemeral server avoids both
         // collisions and leaked port registrations after object eviction.
-        step = 'create-server';
         const server = createServer((req, res) => {
           // The Node bridge uses an internal virtual host. Restore only the
           // platform-routed URL host, already matched to the public origin.
@@ -86,23 +76,19 @@ export class Garden extends DurableObject {
           return this.handler(req, res);
         });
         try {
-          step = 'listen';
           await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, resolve); });
-          step = 'proxy';
           const response = await httpServerHandler({ port: server.address().port }).fetch(request);
           const body = await response.arrayBuffer();
-          step = 'sync';
           await this.ctx.storage.sync();
           return new Response([204,304].includes(response.status) || request.method === 'HEAD' ? null : body,
             { status: response.status, headers: response.headers });
         } finally { await new Promise(resolve => server.close(resolve)); }
       } catch (error) {
         console.error('[garden] cloud request failed:', error.name || 'Error');
-        const phase = step === 'initialize' ? (this.initStep || 'initialize') : step;
         // Discard any in-memory state after a storage failure; load durable data
         // on the next request. Never return configuration values or secrets.
         this.handler = null;
-        return Response.json({ ok: false, error: 'Garden unavailable. Check the deployment configuration and storage limits.', diagnostic: { phase, type: error.name || 'Error', ...(phase === 'keys' ? { keyStatus: this.keyStatus } : {}) } }, { status: 503 });
+        return Response.json({ ok: false, error: 'Garden unavailable. Check the deployment configuration and storage limits.' }, { status: 503 });
       }
     };
     const task = this.queue.then(run); this.queue = task.catch(() => {}); return task;
