@@ -18,6 +18,8 @@ export class Garden extends DurableObject {
   }
   async initialize(origin) {
     this.initStep = 'keys';
+    const keyCheck = value => typeof value !== 'string' ? 'missing' : /^[A-Za-z0-9_+/=-]{32,256}$/.test(value) ? 'format-ok' : 'invalid-format';
+    this.keyStatus = { player: keyCheck(this.env.GARDEN_USER_KEY), ai: keyCheck(this.env.GARDEN_AI_KEY) };
     const keys = validateKeys({ user: this.env.GARDEN_USER_KEY, ai: this.env.GARDEN_AI_KEY });
     this.initStep = 'settings';
     const settings = this.store.load('settings') || {};
@@ -100,7 +102,7 @@ export class Garden extends DurableObject {
         // Discard any in-memory state after a storage failure; load durable data
         // on the next request. Never return configuration values or secrets.
         this.handler = null;
-        return Response.json({ ok: false, error: 'Garden unavailable. Check the deployment configuration and storage limits.', diagnostic: { phase, type: error.name || 'Error' } }, { status: 503 });
+        return Response.json({ ok: false, error: 'Garden unavailable. Check the deployment configuration and storage limits.', diagnostic: { phase, type: error.name || 'Error', ...(phase === 'keys' ? { keyStatus: this.keyStatus } : {}) } }, { status: 503 });
       }
     };
     const task = this.queue.then(run); this.queue = task.catch(() => {}); return task;
